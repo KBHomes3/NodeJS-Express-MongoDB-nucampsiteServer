@@ -26,10 +26,12 @@ promotionRouter.route('/')
     })
     .catch(err => next(err));
 })
+
 .put(authenticate.verifyUser, (req, res) => {
     
     res.end('PUT operation not supported');
 })
+
 .delete(authenticate.verifyUser, authenticate.verifyAdmin, (req, res, next) => {
     Promotion.deleteMany()
     .then(response => {

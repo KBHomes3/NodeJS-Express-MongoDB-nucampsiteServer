@@ -1,13 +1,17 @@
 const express = require('express');
-const bodyParser = require('body-parser');
+//const bodyParser = require('body-parser');
 const Campsite = require('../models/campsite');
 const authenticate = require('../authenticate');
 
 const campsiteRouter = express.Router();
 
-campsiteRouter.use(bodyParser.json());
+campsiteRouter.use(express.json());
 
-campsiteRouter.route('/')
+campsiteRouter.route('/').all((req, res, next) => {
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/plain");
+    next();
+})
 .get((req, res, next) => {
     Campsite.find()
     .populate('comments.author')
@@ -42,7 +46,11 @@ campsiteRouter.route('/')
     .catch(err => next(err));
 });
 
-campsiteRouter.route('/:campsiteId')
+campsiteRouter.route('/:campsiteId').all((req, res, next) => {
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "text/plain");
+    next();
+})
 .get((req, res, next) => {
     Campsite.findById(req.params.campsiteId)
     .populate('comments.author')
@@ -79,7 +87,7 @@ campsiteRouter.route('/:campsiteId')
 });
 
 campsiteRouter.route('/:campsiteId/comments')
-.get((req, res, next) => {
+.get(authenticate.verifyUser, (req, res, next) => {
     Campsite.findById(req.params.campsiteId)
     .populate('comments.author')
     .then(campsite => {
@@ -99,10 +107,10 @@ campsiteRouter.route('/:campsiteId/comments')
     Campsite.findById(req.params.campsiteId)
     .then(campsite => {
         if (campsite) {
+            req.body.author = req.user._id;
+            campsite.comments.push(req.body);
             campsite.save()
             .then(campsite => {
-                req.body.author = req.user._id;
-                campsite.comments.push(req.body);
                 res.statusCode = 200;
                 res.setHeader('Content-Type', 'application/json');
                 res.json(campsite);
@@ -173,20 +181,26 @@ campsiteRouter.route('/:campsiteId/comments/:commentId')
     Campsite.findById(req.params.campsiteId)
     .then(campsite => {
             if (campsite && campsite.comments.id(req.params.commentId)) {
-                console.log("it's getting here! ", campsite.comments.id(req.params.commentId))
-                if (req.body.rating) {
-                    campsite.comments.id(req.params.commentId).rating = req.body.rating;
+                const commentAuthorId = campsite.comments.id(req.params.commentId).author._id;
+                if (commentAuthorId.equals(req.user._id)){
+                    if (req.body.rating) {
+                        campsite.comments.id(req.params.commentId).rating = req.body.rating;
+                    }
+                    if (req.body.text) {
+                        campsite.comments.id(req.params.commentId).text = req.body.text;
+                    }
+                    campsite.save()
+                    .then(campsite => {
+                        res.statusCode = 200;
+                        res.setHeader('Content-Type', 'application/json');
+                        res.json(campsite);
+                    })
+                    .catch(err => next(err));
+                } else {
+                    const err = new Error('You are not the original author of this comment');
+                    err.status = 403;
+                    return next(err);
                 }
-                if (req.body.text) {
-                    campsite.comments.id(req.params.commentId).text = req.body.text;
-                }
-                campsite.save()
-                .then(campsite => {
-                    res.statusCode = 200;
-                    res.setHeader('Content-Type', 'application/json');
-                    res.json(campsite);
-                })
-                .catch(err => next(err));
             } else if (!campsite) {
                 err = new Error(`Campsite ${req.params.campsiteId} not found`);
                 err.status = 404;
@@ -202,7 +216,9 @@ campsiteRouter.route('/:campsiteId/comments/:commentId')
 .delete(authenticate.verifyUser, (req, res, next) => {
     Campsite.findById(req.params.campsiteId)
     .then(campsite => {
-            if (campsite && campsite.comments.id(req.params.commentId) ) {
+        if (campsite && campsite.comments.id(req.params.commentId) ) {
+            const commentAuthorId = campsite.comments.id(req.params.commentId).author._id;
+            if (commentAuthorId.equals(req.user._id)){
                 campsite.comments.id(req.params.commentId).remove();
                 campsite.save()
                 .then(campsite => {
@@ -211,15 +227,21 @@ campsiteRouter.route('/:campsiteId/comments/:commentId')
                     res.json(campsite);
                 })
                 .catch(err => next(err));
-            } else if (!campsite) {
-                err = new Error(`Campsite ${req.params.campsiteId} not found`);
-                err.status = 404;
-                return next(err);
             } else {
-                err = new Error(`Comment ${req.params.commentId} not found`);
-                err.status = 404;
+                const err = new Error('You are not the original author of this comment');
+                err.status = 403;
                 return next(err);
             }
+            
+        } else if (!campsite) {
+            err = new Error(`Campsite ${req.params.campsiteId} not found`);
+            err.status = 404;
+            return next(err);
+        } else {
+            err = new Error(`Comment ${req.params.commentId} not found`);
+            err.status = 404;
+            return next(err);
+        }
 
     })
     .catch(err => next(err));
